@@ -270,3 +270,68 @@ body.bg-dark {
   border-radius: 999px;
 }
 
+/* ----------------------------- */
+/* TABLET (≈10") ADAPTATIONS  */
+/* Target landscape and portrait tablet viewports */
+/* ----------------------------- */
+@media (min-width: 720px) and (max-width: 1200px) {
+  /* Apply tablet styles only on the autorecepcion page */
+  .autorecepcion .app-wrapper {
+    max-width: 980px;
+    padding: 2rem;
+  }
+
+  /* Bigger, touch-friendly header/logo */
+  .autorecepcion .logo-fertya { height: 64px; }
+  .autorecepcion .logo-fertya-large { height: 100px; }
+  .autorecepcion .app-title { font-size: 1.9rem; }
+  .autorecepcion .subtitle { font-size: 1rem; }
+
+  /* Cards get more breathing room */
+  .autorecepcion .card { padding: 2rem; border-radius: 20px; }
+  .autorecepcion .card--wide { max-width: 920px; }
+
+  /* Forms: stack fields vertically to maximize size and readability */
+  .autorecepcion .form-grid { grid-template-columns: 1fr; gap: 1.1rem; }
+  .autorecepcion .form-group label { font-size: 1.05rem; }
+  .autorecepcion .form-group input, .autorecepcion .form-group select { font-size: 1.05rem; }
+  .autorecepcion .form-grid .form-group { min-width: 0; }
+
+  /* Make inputs and buttons larger for touch */
+  .autorecepcion .form-group input, .autorecepcion .form-group select { padding: 0.9rem 1rem; border-radius: 12px; }
+  .autorecepcion .btn-primary { padding: 1.05rem 1.6rem; font-size: 1.15rem; min-height: 56px; }
+  .autorecepcion .btn-secondary, .autorecepcion .btn-small { min-height: 44px; padding: 0.6rem 1rem; }
+
+  /* Result / QR panel: center and enlarge text */
+  .autorecepcion .result-box { padding: 1.6rem 1.8rem; }
+  .autorecepcion .result-code span { font-size: 1.9rem; font-weight:800; }
+  .autorecepcion .qr-panel canvas { display: block; width: 220px !important; height: 220px !important; }
+
+  /* Reception table: increase spacing and font-size */
+  .autorecepcion .data-table th, .autorecepcion .data-table td { padding: 12px; font-size: 1rem; }
+
+  /* Now-code prominent on tablet */
+  .autorecepcion .now-code { font-size: 3rem; padding: 1.6rem; }
+
+  /* Progress bar and badges larger */
+  .autorecepcion .progress-track { height: 12px; }
+  .autorecepcion .progress-fill { height: 12px; }
+  .autorecepcion .badge-status--waiting, .autorecepcion .badge-status--called { padding: 6px 10px; }
+
+  /* Make the home container buttons more tappable */
+  .autorecepcion .home-btn { padding: 0.9rem 1.4rem; font-size: 1.05rem; border-radius: 12px; }
+}
+
+/* Additional tweak for narrow tablets in portrait */
+@media (min-width: 600px) and (max-width: 820px) and (orientation: portrait) {
+  .autorecepcion .form-grid { grid-template-columns: 1fr; }
+  .autorecepcion .app-wrapper { padding: 1.2rem; }
+  .autorecepcion .logo-fertya { height: 56px; }
+  /* Increase overall font-size by 15% for better readability on tall tablets */
+  .autorecepcion {
+    font-size: 115%;
+    line-height: 1.35;
+  }
+  .autorecepcion .app-title { font-size: 2.2rem; }
+}
+

@@ -13,7 +13,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
 </head>
 
-<body class="bg">
+<body class="bg autorecepcion">
   <div class="app-wrapper">
 
     <!-- Header -->
@@ -92,7 +92,8 @@
       serverTimestamp,
       Timestamp,
       runTransaction,
-      doc
+      doc,
+      onSnapshot
     } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
 
   import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
@@ -269,6 +270,30 @@
             level: "H"
           });
         }, 50);
+
+        // Escuchar cambios en el documento recién creado: si se marca como consumido
+        // borramos/ocultamos el QR para evitar que otro paciente lo re-utilice.
+        try {
+          const unsubTokenListener = onSnapshot(ref, (snap) => {
+            if (!snap.exists()) return;
+            const d = snap.data();
+            if (d && d.tokenConsumed) {
+              // Ocultar canvas y limpiar dibujo
+              try {
+                qrCanvas.style.display = 'none';
+                const ctx = qrCanvas.getContext && qrCanvas.getContext('2d');
+                if (ctx) ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+                const qt = document.querySelector('.qr-text');
+                if (qt) qt.textContent = 'Código escaneado. Gracias.';
+              } catch (e) { console.warn('Limpiando QR tras consumo:', e); }
+
+              // Desuscribirse del listener
+              try { unsubTokenListener(); } catch (e) {}
+            }
+          });
+        } catch (e) {
+          console.warn('No se pudo crear listener de tokenConsumed:', e);
+        }
 
         statusMessage.textContent = "";
         form.reset();
