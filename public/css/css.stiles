@@ -1,0 +1,271 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body.bg {
+  background: #F3F4F6;
+  color: #111827;
+  min-height: 100vh;
+}
+
+body.bg-dark {
+  background: #020617;
+  color: #F9FAFB;
+  min-height: 100vh;
+}
+
+/* ----------------------------- */
+/* LAYOUT BASE */
+/* ----------------------------- */
+
+.app-wrapper {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.app-header--center {
+  justify-content: center;
+  text-align: center;
+  flex-direction: column;
+}
+
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.app-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.logo-fertya {
+  height: 48px;
+}
+
+.logo-fertya-large {
+  height: 70px;
+}
+
+.app-title {
+  font-size: 1.6rem;
+  margin-bottom: 0.15rem;
+  color: #1E3A8A;
+}
+
+.subtitle {
+  font-size: 0.95rem;
+  color: #4B5563;
+}
+
+/* ----------------------------- */
+/* CARDS */
+/* ----------------------------- */
+
+.card {
+  background: #FFFFFF;
+  border-radius: 18px;
+  padding: 1.5rem;
+  box-shadow: 0 10px 25px rgba(15,23,42,0.08);
+}
+
+.card--wide {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+/* ----------------------------- */
+/* FORMULARIOS */
+/* ----------------------------- */
+
+.form-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-weight: 600;
+  color: #1E3A8A;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid #D1D5DB;
+  background: #F9FAFB;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #2563EB;
+  background: #fff;
+}
+
+/* ----------------------------- */
+/* BOTONES */
+/* ----------------------------- */
+
+.btn-primary {
+  padding: 0.75rem 1.4rem;
+  border-radius: 999px;
+  border: none;
+  background: #1E3A8A;
+  color: white;
+  font-weight: 600;
+  transition: 0.15s;
+}
+
+.btn-primary:hover {
+  background: #1D4ED8;
+}
+
+.btn-secondary {
+  padding: 0.6rem 1rem;
+  border-radius: 999px;
+  border: 1px solid #1E3A8A;
+  background: white;
+  color: #1E3A8A;
+}
+
+.btn-small {
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid #1E3A8A;
+  background: white;
+  color: #1E3A8A;
+}
+
+/* ----------------------------- */
+/* RESULTADOS Y QR */
+/* ----------------------------- */
+
+.result-box {
+  padding: 1rem 1.2rem;
+  border-radius: 16px;
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+}
+
+.result-title {
+  color: #1E3A8A;
+  font-weight: 600;
+}
+
+.result-code span {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #1D4ED8;
+}
+
+.qr-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* ----------------------------- */
+/* TABLA RECEPCIÓN */
+/* ----------------------------- */
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th {
+  background: #EFF6FF;
+  text-align: left;
+  padding: 8px;
+}
+
+.data-table td {
+  padding: 6px;
+  border-bottom: 1px solid #E5E7EB;
+}
+
+/* ----------------------------- */
+/* PANTALLA SALA DE ESPERA */
+/* ----------------------------- */
+
+.now-code {
+  background: #020617;
+  padding: 1.2rem;
+  border-radius: 12px;
+  color: #F9FAFB;
+  font-size: 2.6rem;
+  text-align: center;
+}
+
+.queue-chip {
+  background: #0F172A;
+  border: 1px solid #1D4ED8;
+  padding: 0.6rem 1rem;
+  border-radius: 999px;
+  color: white;
+  font-weight: 600;
+}
+
+/* ----------------------------- */
+/* SEGUIMIENTO - BARRA PROGRESO */
+/* ----------------------------- */
+
+.progress-track {
+  background: #E5E7EB;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 8px;
+  background: linear-gradient(90deg, #3B82F6, #2563EB);
+  width: 0%;
+  transition: 0.3s ease;
+}
+
+.progress-step {
+  text-align: center;
+  margin-bottom: 0.3rem;
+  color: #6B7280;
+}
+
+.progress-step--active {
+  color: #1E3A8A;
+  font-weight: 600;
+}
+
+.badge-status--waiting {
+  background: #DBEAFE;
+  color: #1E3A8A;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.badge-status--called {
+  background: #DCFCE7;
+  color: #166534;
+  padding: 4px 8px;
+  border-radius: 999px;
+}

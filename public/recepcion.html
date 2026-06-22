@@ -1,0 +1,602 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Recepción – Fertya</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body class="bg">
+<div class="app-wrapper">
+
+  <!-- ENCABEZADO -->
+  <header class="app-header">
+    <div class="app-header-left">
+      <img src="img/logo-fertya.png" class="logo-fertya" alt="Fertya" />
+      <div>
+        <h1 class="app-title">Panel de recepción</h1>
+        <p class="subtitle">Gestión de sala de espera </p>
+      </div>
+    </div>
+
+    <div class="app-header-right">
+      <label for="receptionSelect" style="margin-right:0.5rem;color:#333;">Recepción:</label>
+      <select id="receptionSelect" style="margin-right:0.75rem;">
+        <option value="Recepción 1">Recepción 1</option>
+        <option value="Recepción 2">Recepción 2</option>
+        <option value="Recepción 3">Recepción 3</option>
+        <option value="Recepción 4">Recepción 4</option>
+      </select>
+      <button id="exportBtn" class="btn-secondary">Exportar día (CSV)</button>
+      <button id="closeDayBtn" class="btn-secondary" style="margin-left:0.5rem">Cerrar jornada / Limpiar panel</button>
+      <span id="toolbarStatus" class="toolbar-status"></span>
+    </div>
+  </header>
+
+  <!-- TABLA -->
+  <main class="card">
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>DNI</th>
+            <th>Motivo</th>
+            <th>Hora ingreso</th>
+            <th>Hora llamado</th>
+            <th>Llamado por</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="turnosBody"></tbody>
+      </table>
+    </div>
+  </main>
+
+</div>
+
+<!-- CONTENEDOR DE PANTALLA (TICKET) -->
+<div id="screen-ticket" class="screen-ticket" aria-live="polite" role="status" style="display:none;">
+  <!-- El contenido será inyectado por JS -->
+</div>
+
+<!-- FIREBASE + LÓGICA -->
+<script type="module">
+
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+  import {
+    getFirestore,
+    collection,
+    query,
+    where,
+    orderBy,
+    onSnapshot,
+    updateDoc,
+    doc,
+    getDocs,
+    runTransaction,
+    writeBatch,
+    serverTimestamp,
+    Timestamp
+  } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
+
+  /* FIREBASE */
+  const firebaseConfig = {
+    apiKey: "AIzaSyAHqP51RNsvTAcxu6EOJHw9GYOFy-TIhlM",
+    authDomain: "gestor-fila.firebaseapp.com",
+    projectId: "gestor-fila",
+    storageBucket: "gestor-fila.firebasestorage.app",
+    messagingSenderId: "782419517388",
+    appId: "1:782419517388:web:b1ef6d213c20180b8d8769"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
+
+  // Aseguramos sesión anónima para que las operaciones desde recepción estén autenticadas
+  (async () => {
+    try {
+      await signInAnonymously(auth);
+      console.log('Recepción: autenticado anónimamente');
+    } catch (e) {
+      console.warn('Recepción: no se pudo iniciar auth anónima', e);
+    }
+  })();
+
+  /* REFERENCIAS DEL DOM */
+  const turnosBody = document.getElementById("turnosBody");
+  const exportBtn = document.getElementById("exportBtn");
+  const closeDayBtn = document.getElementById("closeDayBtn");
+  const toolbarStatus = document.getElementById("toolbarStatus");
+
+  // Cuando suppressRender=true, la UI permanece vacía hasta que el usuario restaure
+  let suppressRender = false;
+
+  /* UTILS */
+  function inicioDelDia() {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0);
+  }
+
+  // -------------------- Notificaciones para recepción --------------------
+  let lastEnFilaCount = 0;
+  let titleInterval = null;
+  const originalTitle = document.title || 'Recepción';
+
+  function requestNotificationPermission() {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      try { Notification.requestPermission().then(() => {}); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function startTitleBlink(text) {
+    if (titleInterval) return;
+    titleInterval = setInterval(() => {
+      document.title = document.title === originalTitle ? text : originalTitle;
+    }, 900);
+  }
+
+  function stopTitleBlink() {
+    if (!titleInterval) return;
+    clearInterval(titleInterval);
+    titleInterval = null;
+    document.title = originalTitle;
+  }
+
+  function notifyReception(count) {
+    const text = count === 1 ? 'Hay 1 paciente en espera' : `Hay ${count} pacientes en espera`;
+    // Notification API
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification('Fertya - Pacientes en espera', { body: text, icon: 'img/logo-fertya.png' });
+      } catch (e) { console.warn('Notification error', e); }
+    }
+
+    // título intermitente
+    startTitleBlink('(!) ' + text);
+  }
+
+  // Solicitar permiso al cargar (no forzar diálogo repetido)
+  try { requestNotificationPermission(); } catch (e) { /* ignore */ }
+
+  // Detener blink cuando la pestaña se vuelva visible
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) stopTitleBlink();
+  });
+
+
+  function hora(ts) {
+    if (!ts) return "";
+    const date = ts.toDate();
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  const motivos = {
+    CON: "Consultas",
+    LAB: "Laboratorio",
+    ES: "Espermograma",
+    CT: "Control de tratamiento",
+    EP: "Estudios previos",
+    OT: "Otras gestiones"
+  };
+
+  /* MAPA DE SERVICIOS PARA PANTALLA (USAR LETRAS POR MOTIVO) */
+  const SERVICE_MAP = {
+    C: { name: 'Consultas', color: '#2E86C1', icon: '🩺' },
+    L: { name: 'Laboratorio', color: '#28B463', icon: '🔬' },
+    E: { name: 'Espermograma', color: '#AF7AC5', icon: '🧪' },
+    T: { name: 'Control de tratamiento', color: '#F39C12', icon: '💊' },
+    P: { name: 'Estudios previos', color: '#17A589', icon: '📄' },
+    O: { name: 'Otras gestiones', color: '#7F8C8D', icon: '�' }
+  };
+
+  // Mapea el código de motivo almacenado en la BD a la letra que se debe usar en pantalla
+  function serviceLetterFromMotivo(motivoCodigo) {
+    if (!motivoCodigo) return 'C';
+    const m = motivoCodigo.toString().toUpperCase();
+    switch (m) {
+      case 'CON': // Consultas (si existen claves largas)
+      case 'C':
+        return 'C';
+      case 'LAB':
+      case 'L':
+        return 'L';
+      case 'ES':
+      case 'E':
+        return 'E';
+      case 'CT':
+      case 'T':
+      case 'TRAT':
+        return 'T';
+      case 'EP':
+      case 'P':
+      case 'PREV':
+        return 'P';
+      case 'OT':
+      case 'O':
+        return 'O';
+      default:
+        // Si no está mapeado, pero la cadena tiene una sola letra significativa, úsala
+        if (m.length === 1) return m;
+        return 'C';
+    }
+  }
+
+  function getSeqFromCodigoVisible(codigoVisible) {
+    if (!codigoVisible) return 0;
+    const match = codigoVisible.match(/(\d+)/);
+    if (match) return parseInt(match[0], 10) || 0;
+    return 0;
+  }
+
+  function formatTicketLabel(code, seq) {
+    const seqStr = String(seq || 0).padStart(3, '0');
+    return `${code}-${seqStr}`;
+  }
+
+  // Muestra el ticket grande en la pantalla (y lo oculta automáticamente después de X segundos)
+  function showTicket(code, seq, opts = {}) {
+    const cfg = SERVICE_MAP[code] || { name: 'Desconocido', color: '#AAAAAA', icon: '❓' };
+    const label = formatTicketLabel(code, seq);
+    const container = document.getElementById('screen-ticket');
+    container.style.display = 'block';
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;gap:20px;padding:16px;">
+        <div style="font-size:64px;padding:18px;border-radius:12px;background:${cfg.color};color:white;display:flex;align-items:center;justify-content:center;">${cfg.icon}</div>
+        <div style="text-align:left;">
+          <div style="font-size:56px;font-weight:700;">${label}</div>
+          <div style="font-size:20px;color:#333;margin-top:6px;">${cfg.name}</div>
+        </div>
+      </div>
+    `;
+
+    // Si se pidió que se muestre en una duración limitada, ocultar después
+    const duration = opts.duration || 7000; // ms
+    if (duration > 0) {
+      setTimeout(() => {
+        container.style.display = 'none';
+        container.innerHTML = '';
+      }, duration);
+    }
+  }
+
+  /* ESCUCHA EN TIEMPO REAL */
+  function escucharTurnos() {
+    const qTurnos = query(
+      collection(db, "turnos_fertya"),
+      where("createdAt", ">=", Timestamp.fromDate(inicioDelDia())),
+      orderBy("createdAt", "asc")
+    );
+
+    onSnapshot(qTurnos, (snapshot) => {
+      // Contar turnos 'en-fila'
+      const enFilaCount = snapshot.docs.filter(d => d.data().estado === 'en-fila' && !d.data().tokenConsumed).length;
+
+      // Si la pestaña está oculta y la cantidad aumentó, notificar
+      if (document.hidden && enFilaCount > lastEnFilaCount) {
+        notifyReception(enFilaCount);
+      }
+      lastEnFilaCount = enFilaCount;
+
+      renderizar(snapshot);
+    });
+  }
+
+  /* RENDER */
+  function renderizar(snapshot) {
+    if (suppressRender) {
+      // Si el usuario cerró la jornada visualmente, no actualizamos la vista
+      return;
+    }
+
+    turnosBody.innerHTML = "";
+
+    if (snapshot.empty) {
+      turnosBody.innerHTML =
+        `<tr><td colspan="7" class="empty-row">No hay pacientes en espera.</td></tr>`;
+      return;
+    }
+
+    snapshot.forEach((docSnap) => {
+      const d = docSnap.data();
+      const row = document.createElement("tr");
+
+      row.innerHTML = `
+        <td>${d.codigoVisible || ""}</td>
+        <td>${d.dni || ""}</td>
+        <td>${motivos[d.motivoCodigo] || d.motivoCodigo}</td>
+        <td>${hora(d.horaIngreso || d.createdAt)}</td>
+        <td>${hora(d.horaLlamado)}</td>
+        <td>${d.llamadoPor || ''}</td>
+        <td>${d.estado}</td>
+        <td class="actions-cell"></td>
+      `;
+
+      const acciones = row.querySelector(".actions-cell");
+
+      /* BOTÓN LLAMAR */
+      if (d.estado === "en-fila") {
+        const btn = document.createElement("button");
+        btn.className = "btn-small";
+        btn.textContent = "Llamar";
+        btn.onclick = () => llamar(docSnap.id);
+        acciones.appendChild(btn);
+      }
+
+      /* BOTÓN DEVOLVER */
+      if (d.estado === "llamado") {
+        const btn2 = document.createElement("button");
+        btn2.className = "btn-small";
+        btn2.textContent = "Devolver";
+        btn2.onclick = () => devolver(docSnap.id);
+        acciones.appendChild(btn2);
+        // BOTÓN FINALIZAR
+        const btnFinalizar = document.createElement("button");
+        btnFinalizar.className = "btn-small btn-primary";
+        btnFinalizar.textContent = "Finalizar";
+        btnFinalizar.style.marginLeft = '0.5rem';
+        btnFinalizar.onclick = () => finalizar(docSnap.id, btnFinalizar);
+        acciones.appendChild(btnFinalizar);
+      }
+
+      turnosBody.appendChild(row);
+    });
+  }
+
+  // --- CERRAR JORNADA / LIMPIAR PANEL ---
+  closeDayBtn.onclick = async function () {
+    const confirmMsg = 'Pulsa Aceptar para FINALIZAR en el servidor todos los turnos "en-fila" del día actual. Pulsa Cancelar para limpiar solo la vista (no tocar la base de datos).';
+    const doFinalize = confirm(confirmMsg);
+    if (doFinalize) {
+      // Finalizar en servidor
+      closeDayBtn.disabled = true;
+      toolbarStatus.textContent = 'Finalizando turnos en servidor...';
+      try {
+        await finalizarTurnosEnServidor();
+        toolbarStatus.textContent = 'Jornada finalizada ✔';
+      } catch (e) {
+        console.error('Error finalizando jornada:', e);
+        alert('Ocurrió un error al finalizar la jornada. Revisa la consola.');
+        toolbarStatus.textContent = 'Error al finalizar';
+      } finally {
+        closeDayBtn.disabled = false;
+        setTimeout(() => toolbarStatus.textContent = '', 3000);
+      }
+    } else {
+      // Limpiar solo la vista
+      suppressRender = true;
+      turnosBody.innerHTML = `<tr><td colspan="7" class="empty-row">Panel limpio (vista local). Pulsa 'Mostrar jornada' para restaurar.</td></tr>`;
+      closeDayBtn.textContent = 'Mostrar jornada';
+      // cambiar comportamiento para restaurar al pulsar nuevamente
+      const restore = () => {
+        suppressRender = false;
+        closeDayBtn.textContent = 'Cerrar jornada / Limpiar panel';
+        closeDayBtn.removeEventListener('click', restore);
+        // renderizamos una vez desde servidor
+        (async () => {
+          try {
+            const qData = await getDocs(
+              query(
+                collection(db, "turnos_fertya"),
+                where("createdAt", ">=", Timestamp.fromDate(inicioDelDia())),
+                orderBy("createdAt", "asc")
+              )
+            );
+            // construir snapshot-like: reutilizar renderizar by creating a fake snapshot object isn't trivial;
+            // simplemente limpiamos y dibujamos filas similares a renderizar
+            turnosBody.innerHTML = '';
+            if (qData.empty) {
+              turnosBody.innerHTML = `<tr><td colspan="7" class="empty-row">No hay pacientes en espera.</td></tr>`;
+              return;
+            }
+            qData.forEach((docSnap) => {
+              const d = docSnap.data();
+              const row = document.createElement('tr');
+              row.innerHTML = `
+                <td>${d.codigoVisible || ''}</td>
+                <td>${d.dni || ''}</td>
+                <td>${motivos[d.motivoCodigo] || d.motivoCodigo}</td>
+                <td>${hora(d.horaIngreso || d.createdAt)}</td>
+                  <td>${hora(d.horaLlamado)}</td>
+                  <td>${d.llamadoPor || ''}</td>
+                  <td>${d.estado}</td>
+                <td class="actions-cell"></td>
+              `;
+              // reutilizamos lógica mínima de renderizado de acciones: si está llamado, añadir botones
+              const acciones = row.querySelector('.actions-cell');
+              if (d.estado === 'en-fila') {
+                const btn = document.createElement('button'); btn.className = 'btn-small'; btn.textContent = 'Llamar'; btn.onclick = () => llamar(docSnap.id); acciones.appendChild(btn);
+              }
+              if (d.estado === 'llamado') {
+                const btn2 = document.createElement('button'); btn2.className = 'btn-small'; btn2.textContent = 'Devolver'; btn2.onclick = () => devolver(docSnap.id); acciones.appendChild(btn2);
+                const btnFinalizar = document.createElement('button'); btnFinalizar.className = 'btn-small btn-primary'; btnFinalizar.textContent = 'Finalizar'; btnFinalizar.style.marginLeft = '0.5rem'; btnFinalizar.onclick = () => finalizar(docSnap.id, btnFinalizar); acciones.appendChild(btnFinalizar);
+                // Mostrar ticket en pantalla si existe información para ello
+                (function showIfCalled() {
+                  try {
+                    const code = serviceLetterFromMotivo(d.motivoCodigo);
+                    const seq = getSeqFromCodigoVisible(d.codigoVisible) || 0;
+                    showTicket(code, seq, { duration: 8000 });
+                  } catch (e) {
+                    console.error('Error mostrando ticket en restauración:', e);
+                  }
+                })();
+              }
+              turnosBody.appendChild(row);
+            });
+          } catch (e) {
+            console.error('Error restaurando vista:', e);
+          }
+        })();
+      };
+      closeDayBtn.addEventListener('click', restore);
+    }
+  };
+
+  // Finaliza en servidor todos los documentos "en-fila" del día actual (batching)
+  async function finalizarTurnosEnServidor() {
+    const qData = await getDocs(
+      query(
+        collection(db, 'turnos_fertya'),
+        where('createdAt', '>=', Timestamp.fromDate(inicioDelDia())),
+        where('estado', '==', 'en-fila')
+      )
+    );
+
+    if (qData.empty) return;
+
+    const docs = qData.docs;
+    const batchSize = 400; // < 500 límite Firestore
+    for (let i = 0; i < docs.length; i += batchSize) {
+      const batch = writeBatch(db);
+      const slice = docs.slice(i, i + batchSize);
+      slice.forEach(d => {
+        batch.update(doc(db, 'turnos_fertya', d.id), { estado: 'finalizado', horaFinalizado: serverTimestamp() });
+      });
+      await batch.commit();
+    }
+  }
+
+  /* LÓGICA DE BOTONES */
+  async function llamar(id) {
+    // Usar transacción para garantizar escritura atómica de llamadoPor y llamadas
+    const receptionSelect = document.getElementById('receptionSelect');
+    const llamadoPor = (receptionSelect && receptionSelect.value) ? receptionSelect.value : 'Recepción';
+
+    try {
+      if (receptionSelect) localStorage.setItem('lastReception', receptionSelect.value);
+    } catch (e) {
+      console.warn('No se pudo persistir recepción:', e);
+    }
+
+    const ref = doc(db, "turnos_fertya", id);
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const ds = await tx.get(ref);
+        if (!ds.exists()) throw new Error('no-existe');
+        const data = ds.data();
+        const llamadas = Array.isArray(data.llamadas) ? data.llamadas.slice() : [];
+        llamadas.push({ by: llamadoPor, at: serverTimestamp() });
+
+        tx.update(ref, {
+          estado: 'llamado',
+          horaLlamado: serverTimestamp(),
+          llamadoPor: llamadoPor,
+          llamadas: llamadas
+        });
+      });
+    } catch (e) {
+      console.error('Error en transacción llamar:', e);
+      // Intentar fallback
+      try {
+        await updateDoc(ref, { estado: 'llamado', horaLlamado: serverTimestamp(), llamadoPor: llamadoPor });
+      } catch (err) {
+        console.error('Fallback update error:', err);
+      }
+    }
+
+    // Recuperar el documento actualizado para obtener datos necesarios para pantalla
+    try {
+      const dSnap = await getDocs(query(collection(db, 'turnos_fertya'), where('__name__', '==', id)));
+      if (!dSnap.empty) {
+        const d = dSnap.docs[0].data();
+        // Forzar la letra de servicio según motivo, y extraer número secuencial del codigoVisible si existe
+        const code = serviceLetterFromMotivo(d.motivoCodigo);
+        const seq = getSeqFromCodigoVisible(d.codigoVisible) || 0;
+        showTicket(code, seq, { duration: 8000 });
+      }
+    } catch (e) {
+      console.error('No se pudo recuperar documento para mostrar ticket:', e);
+    }
+  }
+
+  async function devolver(id) {
+    await updateDoc(doc(db, "turnos_fertya", id), {
+      estado: "en-fila",
+      horaLlamado: null
+    });
+  }
+
+  async function finalizar(id, btn) {
+    if (!confirm('¿Deseas finalizar este turno? Esta acción marcará el turno como finalizado.')) return;
+    try {
+      if (btn) { btn.disabled = true; btn.textContent = 'Finalizando...'; }
+      await updateDoc(doc(db, "turnos_fertya", id), {
+        estado: "finalizado",
+        horaFinalizado: serverTimestamp()
+      });
+    } catch (e) {
+      console.error('Error finalizando turno:', e);
+      alert('No se pudo finalizar el turno. Revisa la consola para más detalles.');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Finalizar'; }
+    }
+  }
+
+  /* EXPORTACIÓN CSV */
+  async function exportar() {
+    toolbarStatus.textContent = "Generando archivo...";
+
+    const qData = await getDocs(
+      query(
+        collection(db, "turnos_fertya"),
+        where("createdAt", ">=", Timestamp.fromDate(inicioDelDia())),
+        orderBy("createdAt", "asc")
+      )
+    );
+
+  const filas = [["DNI","Código","Motivo","Ingreso","Llamado","Finalizado","Estado"]];
+    
+    qData.forEach((docSnap) => {
+      const d = docSnap.data();
+      filas.push([
+        d.dni || "",
+        d.codigoVisible || "",
+        motivos[d.motivoCodigo] || d.motivoCodigo,
+        hora(d.horaIngreso || d.createdAt),
+        hora(d.horaLlamado),
+        hora(d.horaFinalizado),
+        d.estado
+      ]);
+    });
+
+    const csv = filas.map(f => f.map(v => `"${v}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "turnos_fertya.csv";
+    link.click();
+
+    URL.revokeObjectURL(url);
+    toolbarStatus.textContent = "Exportación lista ✔";
+    setTimeout(() => toolbarStatus.textContent = "", 4000);
+  }
+
+  exportBtn.onclick = exportar;
+
+  /* INICIO */
+  escucharTurnos();
+
+  // Restaurar última recepción usada (persistida en localStorage)
+  try {
+    const last = localStorage.getItem('lastReception');
+    if (last) {
+      const sel = document.getElementById('receptionSelect');
+      if (sel) sel.value = last;
+    }
+  } catch (e) {
+    console.warn('No se pudo restaurar recepción desde localStorage', e);
+  }
+
+</script>
+
+</body>
+</html>
+

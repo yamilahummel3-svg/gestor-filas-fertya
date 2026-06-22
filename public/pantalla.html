@@ -1,0 +1,181 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pantalla de Turnos</title>
+  
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { font-family: sans-serif; background:#fafafa; }
+    .list { display:flex; flex-direction:column; gap:8px; }
+    .card { padding:12px; border-radius:6px; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.08); transition: transform .18s ease, box-shadow .18s ease; }
+    .consumed { opacity:0.4; text-decoration:line-through; }
+
+    /* Destaque para turnos en estado 'llamado' - color personalizado via CSS variables */
+    .card.llamado {
+      transform: translateY(-4px);
+      border-left: 6px solid var(--llamado-color, #e67e22);
+      animation: pulseGlow 1.6s infinite ease-in-out;
+    }
+
+    @keyframes pulseGlow {
+      0% { box-shadow: 0 4px 14px var(--llamado-color-rgba, rgba(230,126,34,0.18)); }
+      50% { box-shadow: 0 10px 32px var(--llamado-color-rgba, rgba(230,126,34,0.30)); }
+      100% { box-shadow: 0 4px 14px var(--llamado-color-rgba, rgba(230,126,34,0.18)); }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header app-header--center" style="padding:16px; text-align:center;">
+    <img src="img/logo-fertya.png" alt="Fertya Medicina Reproductiva" style="height:56px; margin-bottom:8px;" />
+    <div>
+      <h1 style="margin:0; font-size:1.25rem;">Pantalla de Turnos</h1>
+      <p style="margin:0; color:#666;">Sala de espera</p>
+    </div>
+  </header>
+
+  <main style="padding:24px;">
+    <div id="debugPanel" style="max-width:1000px;margin-bottom:12px;font-size:14px;color:#333;"></div>
+    <div id="list" class="list"></div>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+    import { getFirestore, collection, query, where, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAHqP51RNsvTAcxu6EOJHw9GYOFy-TIhlM",
+      authDomain: "gestor-fila.firebaseapp.com",
+      projectId: "gestor-fila",
+      storageBucket: "gestor-fila.firebasestorage.app",
+      messagingSenderId: "782419517388",
+      appId: "1:782419517388:web:b1ef6d213c20180b8d8769"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const listEl = document.getElementById('list');
+
+    const turnsCol = collection(db, 'turnos_fertya');
+
+    // Mapa de tonos de azul para recepciones
+    const receptionColors = {
+      'Recepción 1': { hex: '#1E90FF', rgba: 'rgba(30,144,255,0.18)' }, // DodgerBlue
+      'Recepción 2': { hex: '#0074D9', rgba: 'rgba(0,116,217,0.18)' },  // Azul fuerte
+      'Recepción 3': { hex: '#0057B7', rgba: 'rgba(0,87,183,0.18)' },  // Azul oscuro
+      'Recepción 4': { hex: '#003F8A', rgba: 'rgba(0,63,138,0.18)' }   // Azul más oscuro
+    };
+
+    // Evitamos dependencias en queries 'in' que pueden requerir índices
+    // Suscribimos dos listeners separados y combinamos resultados en un mapa
+    const docsMap = new Map();
+
+    function renderFromMap() {
+      // Ordenar por createdAt asc
+      const items = Array.from(docsMap.values()).sort((a, b) => {
+        const aa = a.data().createdAt ? a.data().createdAt.seconds : 0;
+        const bb = b.data().createdAt ? b.data().createdAt.seconds : 0;
+        return aa - bb;
+      });
+
+      const debugPanel = document.getElementById('debugPanel');
+      listEl.innerHTML = '';
+      // items es la lista completa ordenada; filtramos los no consumidos para ver cuántos se renderizarán
+      const renderedItems = items.filter(doc => { const dd = doc.data(); return !dd.tokenConsumed; });
+      
+      items.forEach((doc) => {
+        const d = doc.data();
+  // ocultar consumidos solo si NO están siendo llamados: permitir ver llamados aunque tokenConsumed === true
+  if (d.tokenConsumed && d.estado !== 'llamado') return;
+
+        const div = document.createElement('div');
+        div.className = 'card';
+        if (d.estado === 'llamado') div.classList.add('llamado');
+
+        const top = document.createElement('div');
+        top.style.display = 'flex';
+        top.style.justifyContent = 'space-between';
+        top.style.alignItems = 'center';
+
+        const codigo = document.createElement('div');
+        codigo.style.fontWeight = '700';
+        codigo.style.fontSize = '1.1rem';
+        codigo.textContent = d.codigoVisible || '(sin código)';
+
+        const motivo = document.createElement('div');
+        motivo.textContent = d.motivoCodigo || '';
+
+        top.appendChild(codigo);
+        top.appendChild(motivo);
+        div.appendChild(top);
+
+        if (d.horaLlamado || d.llamadoPor || d.estado === 'llamado') {
+          const called = document.createElement('div');
+          called.style.marginTop = '6px';
+          called.style.display = 'flex';
+          called.style.justifyContent = 'space-between';
+          called.style.alignItems = 'center';
+
+          const info = document.createElement('div');
+          info.style.fontSize = '0.95em';
+          info.style.color = '#555';
+          const when = d.horaLlamado ? new Date(d.horaLlamado.seconds * 1000).toLocaleTimeString() : '';
+          info.textContent = `Llamado por: ${d.llamadoPor || '-'} ${when ? 'a las ' + when : ''}`;
+
+          const badge = document.createElement('div');
+          badge.style.padding = '6px 10px';
+          badge.style.borderRadius = '12px';
+          badge.style.fontWeight = '700';
+          badge.style.fontSize = '0.9rem';
+          badge.style.color = 'white';
+
+          // Determinar color según quien llamó
+          const caller = d.llamadoPor || '';
+          const colorInfo = receptionColors[caller] || null;
+          if (colorInfo) {
+            badge.style.background = d.estado === 'llamado' ? colorInfo.hex : '#34495e';
+            // Aplicar variables CSS para la tarjeta
+            div.style.setProperty('--llamado-color', colorInfo.hex);
+            div.style.setProperty('--llamado-color-rgba', colorInfo.rgba);
+          } else {
+            badge.style.background = d.estado === 'llamado' ? '#e67e22' : '#7f8c8d';
+            div.style.removeProperty('--llamado-color');
+            div.style.removeProperty('--llamado-color-rgba');
+          }
+
+          badge.textContent = d.estado === 'llamado' ? 'LLAMANDO' : 'LLAMADO';
+
+          called.appendChild(info);
+          called.appendChild(badge);
+          div.appendChild(called);
+        }
+
+        listEl.appendChild(div);
+      });
+    }
+
+    // helper to process doc changes from snapshot
+    function processSnapshotChanges(snap) {
+      snap.docChanges().forEach(change => {
+        const id = change.doc.id;
+        if (change.type === 'removed') {
+          docsMap.delete(id);
+        } else {
+          docsMap.set(id, change.doc);
+        }
+      });
+      renderFromMap();
+    }
+
+    // Subscripciones separadas para evitar requisitos de índice
+    const qEnFila = query(turnsCol, where('estado', '==', 'en-fila'), orderBy('createdAt'));
+    const qLlamado = query(turnsCol, where('estado', '==', 'llamado'), orderBy('createdAt'));
+
+    onSnapshot(qEnFila, processSnapshotChanges, (err) => console.error('Error en listener en-fila:', err));
+    onSnapshot(qLlamado, processSnapshotChanges, (err) => console.error('Error en listener llamado:', err));
+  </script>
+</body>
+</html>
+

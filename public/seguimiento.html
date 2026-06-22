@@ -1,0 +1,276 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Seguimiento de Turno</title>
+  <!-- Inline favicon to avoid 404 when testing locally -->
+  <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=">
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    /* Ajustes específicos para la página de seguimiento en móviles */
+    header.app-header.app-header--center img {
+      max-width: 220px;
+      height: auto;
+    }
+
+    .card.card--wide {
+      max-width: 920px;
+      margin: 18px auto;
+      padding: 18px;
+    }
+
+    #info { font-size: 1rem; }
+
+    @media (max-width: 768px) {
+      header.app-header.app-header--center {
+        padding: 12px 8px;
+      }
+      header.app-header.app-header--center img {
+        max-width: 160px;
+        height: auto;
+        display:block;
+        margin: 0 auto;
+      }
+      .card.card--wide {
+        margin: 12px;
+        padding: 12px;
+        border-radius: 8px;
+      }
+      #info { font-size: 0.98rem; }
+      #calledInfo { font-size: 1rem; }
+      #soundToggle { transform: scale(1.05); }
+    }
+
+    @media (max-width: 420px) {
+      header.app-header.app-header--center img { max-width: 140px; }
+      .card.card--wide { padding: 10px; margin: 10px; }
+      #nota { font-size: 0.95rem; }
+    }
+  </style>
+</head>
+<body class="bg">
+  <header class="app-header app-header--center" style="padding:16px; text-align:center;">
+    <img src="img/logo-fertya.png" alt="Fertya Medicina Reproductiva" style="height:72px; display:block; margin:0 auto;" />
+  </header>
+
+  <main class="card card--wide">
+  <!-- título removido, solo se muestra el logo en el header -->
+  <p id="message">Validando código…</p>
+    <div id="info" class="hidden">
+      <p>Turno confirmado: <strong id="codigo"></strong></p>
+      <p id="nota"></p>
+      <div style="margin-top:8px;">
+        <label><input type="checkbox" id="soundToggle"> Reproducir sonido al ser llamado</label>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+  import { getFirestore, collection, query, where, limit, getDocs, runTransaction, serverTimestamp, onSnapshot, doc, updateDoc } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAHqP51RNsvTAcxu6EOJHw9GYOFy-TIhlM",
+      authDomain: "gestor-fila.firebaseapp.com",
+      projectId: "gestor-fila",
+      storageBucket: "gestor-fila.firebasestorage.app",
+      messagingSenderId: "782419517388",
+      appId: "1:782419517388:web:b1ef6d213c20180b8d8769"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    function ensureAnonymousAuth() {
+      return new Promise((resolve, reject) => {
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+          if (user) { unsubscribe(); resolve(user); }
+        }, (err) => { unsubscribe(); reject(err); });
+        signInAnonymously(auth).catch((err) => console.warn('signInAnonymously error:', err));
+      });
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+
+    const messageEl = document.getElementById('message');
+    const infoEl = document.getElementById('info');
+    const codigoEl = document.getElementById('codigo');
+
+    // Si se abrió desde file:// el navegador restringe imports y peticiones; avisamos al usuario
+    if (location.protocol === 'file:') {
+      messageEl.textContent = 'Esta página no funciona desde file://. Iniciá un servidor local desde la carpeta public y abrí la URL por http://localhost:8000/seguimiento.html?token=TU_TOKEN';
+    }
+
+    if (!token) {
+      messageEl.textContent = 'Token ausente en la URL.';
+    } else {
+      (async () => {
+        try {
+          await ensureAnonymousAuth();
+          // auth ok
+
+          // Buscar el documento con ese token
+          const turnsCol = collection(db, 'turnos_fertya');
+          const q = query(turnsCol, where('token', '==', token), limit(1));
+          const snap = await getDocs(q);
+          if (snap.empty) {
+            messageEl.textContent = 'Código inválido o no encontrado.';
+            return;
+          }
+          const docRef = snap.docs[0].ref;
+
+          // Consumir token de forma atómica si todavía no fue consumido,
+          // pero NO abortamos si ya fue consumido: permitimos el seguimiento en tiempo real.
+          try {
+            await runTransaction(db, async (tx) => {
+              const ds = await tx.get(docRef);
+              if (!ds.exists()) throw new Error('no-existe');
+              const d = ds.data();
+              if (!d.tokenConsumed) {
+                tx.update(docRef, {
+                  tokenConsumed: true,
+                  tokenConsumedAt: serverTimestamp(),
+                  tokenConsumedBy: navigator.userAgent || 'web'
+                });
+              }
+            });
+          } catch (txErr) {
+            console.warn('Transacción de consumo: ', txErr);
+          }
+
+          // Suscribirse al documento para recibir actualizaciones en tiempo real
+          // Sound helper
+          const audioCtx = (typeof AudioContext !== 'undefined') ? new AudioContext() : null;
+          function beep() {
+            try {
+              if (!audioCtx) return;
+              const o = audioCtx.createOscillator();
+              const g = audioCtx.createGain();
+              o.type = 'sine';
+              o.frequency.setValueAtTime(880, audioCtx.currentTime);
+              g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+              o.connect(g); g.connect(audioCtx.destination);
+              // ramp up
+              g.gain.exponentialRampToValueAtTime(0.2, audioCtx.currentTime + 0.01);
+              o.start();
+              // ramp down and stop
+              g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.6);
+              setTimeout(() => { try { o.stop(); } catch(e){} }, 700);
+            } catch (e) { console.warn('Beep error', e); }
+          }
+
+          // Preferencia de sonido
+          try {
+            const toggle = document.getElementById('soundToggle');
+            const stored = localStorage.getItem('seguimientoSound');
+            if (stored === '1') toggle.checked = true;
+            toggle.addEventListener('change', () => {
+              localStorage.setItem('seguimientoSound', toggle.checked ? '1' : '0');
+            });
+          } catch (e) { /* ignore */ }
+
+          let prevState = null;
+          const unsub = onSnapshot(docRef, (snapshot) => {
+            if (!snapshot.exists()) return;
+            const d = snapshot.data();
+            // Ocultar mensaje de validación
+            messageEl.classList.add('hidden');
+            infoEl.classList.remove('hidden');
+
+            // Mostrar código
+            codigoEl.textContent = d.codigoVisible || '(sin código)';
+
+            // Mostrar estado dinámico
+            // si el turno fue llamado, mostramos la info de llamado
+            const calledInfo = document.getElementById('calledInfo');
+            if (!calledInfo) {
+              const p = document.createElement('p');
+              p.id = 'calledInfo';
+              infoEl.insertBefore(p, infoEl.querySelector('#nota'));
+            }
+            const pEl = document.getElementById('calledInfo');
+            if (d.estado === 'llamado') {
+              const when = d.horaLlamado ? (new Date(d.horaLlamado.seconds * 1000)).toLocaleTimeString() : '';
+              pEl.textContent = `Tu turno está siendo llamado${d.llamadoPor ? ' por ' + d.llamadoPor : ''}${when ? ' a las ' + when : ''}.`;
+
+              // reproducir sonido sólo si hubo transición a 'llamado'
+              try {
+                const toggle = document.getElementById('soundToggle');
+                const enabled = (toggle && toggle.checked) || localStorage.getItem('seguimientoSound') === '1';
+                if (enabled && prevState !== 'llamado') {
+                  if (audioCtx && audioCtx.state === 'suspended') {
+                    audioCtx.resume().catch(()=>{});
+                  }
+                  beep();
+                }
+              } catch(e) { console.warn('Error comprobando sonido', e); }
+
+              // banner para destacar la llamada
+              const bannerId = 'callBanner';
+              let banner = document.getElementById(bannerId);
+              const caller = d.llamadoPor || '';
+              const colorInfo = (function(){
+                switch(caller) {
+                  case 'Recepción 1': return '#1E90FF';
+                  case 'Recepción 2': return '#0074D9';
+                  case 'Recepción 3': return '#0057B7';
+                  case 'Recepción 4': return '#003F8A';
+                  default: return '#e67e22';
+                }
+              })();
+              if (!banner) {
+                banner = document.createElement('div');
+                banner.id = bannerId;
+                banner.style.marginTop = '12px';
+                banner.style.padding = '18px';
+                banner.style.borderRadius = '8px';
+                banner.style.color = '#fff';
+                banner.style.display = 'flex';
+                banner.style.flexDirection = 'column';
+                banner.style.alignItems = 'center';
+                banner.style.justifyContent = 'center';
+                banner.style.gap = '8px';
+                banner.style.boxShadow = '0 6px 20px rgba(0,0,0,0.12)';
+                infoEl.insertBefore(banner, infoEl.firstChild);
+              }
+              banner.style.background = colorInfo;
+              banner.innerHTML = `
+                <div style="font-size:28px;font-weight:800;">${d.codigoVisible || ''}</div>
+                <div style="font-size:18px;">Te están llamando desde <strong>${d.llamadoPor || '-'}</strong></div>
+              `;
+            } else if (d.estado === 'finalizado') {
+              pEl.textContent = 'Tu turno ya fue finalizado.';
+              const b = document.getElementById('callBanner'); if (b) b.remove();
+            } else if (d.estado === 'en-fila') {
+              pEl.textContent = 'Estás en fila. Esperá a ser llamado.';
+              const b = document.getElementById('callBanner'); if (b) b.remove();
+            } else {
+              pEl.textContent = `Estado: ${d.estado || 'desconocido'}`;
+            }
+
+            prevState = d.estado;
+
+            // Si el turno se finaliza o es consumido por otra acción que deba cerrar esta página,
+            // podés decidir si desvincular el listener o mantenerlo. Por ahora lo mantenemos.
+          }, (err) => {
+            console.error('Error en listener de seguimiento:', err);
+          });
+
+        } catch (err) {
+          console.error(err);
+          if (err.message === 'already-consumed') {
+            messageEl.textContent = 'Este código ya fue escaneado/consumido.';
+          } else {
+            messageEl.textContent = 'Error procesando el código. Intentá nuevamente o avisá en recepción.';
+          }
+        }
+      })();
+    }
+  </script>
+</body>
+</html>
+
